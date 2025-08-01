@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: saas-obs-postgres
+    environment:
+      POSTGRES_DB: saas_obs
+      POSTGRES_USER: saas_obs_user
+      POSTGRES_PASSWORD: saas_obs_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - saas-network
+
+  # Redis for Session Management
+  redis:
+    image: redis:7-alpine
+    container_name: saas-obs-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - saas-network
+
+  # Backend API Server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: saas-obs-backend
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://saas_obs_user:saas_obs_password@postgres:5432/saas_obs
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    ports:
+      - "3001:3001"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - saas-network
+    command: npm run dev
+
+  # Frontend React App
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: saas-obs-frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:3001
+      - REACT_APP_STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - saas-network
+    command: npm start
+
+  # SPX-GC Core Application (Template)
+  spx-core:
+    build:
+      context: ./spx-core
+      dockerfile: Dockerfile
+    container_name: saas-obs-spx-core
+    environment:
+      - NODE_ENV=production
+      - PORT=5656
+    volumes:
+      - spx_data:/app/DATAROOT
+      - spx_assets:/app/ASSETS
+    ports:
+      - "5656:5656"
+    networks:
+      - saas-network
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: saas-obs-nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - frontend
+      - backend
+      - spx-core
+    networks:
+      - saas-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  spx_data:
+  spx_assets:
+
+networks:
+  saas-network:
+    driver: bridge 
