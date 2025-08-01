@@ -1,0 +1,235 @@
+// This is your Prisma schema file for MySQL (Hostinger compatibility)
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// User Management
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  firstName     String
+  lastName      String
+  role          UserRole @default(USER)
+  isActive      Boolean  @default(true)
+  emailVerified Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relationships
+  organization    Organization? @relation(fields: [organizationId], references: [id])
+  organizationId  String?
+  subscriptions   Subscription[]
+  instances       Instance[]
+  apiKeys         ApiKey[]
+  usageLogs       UsageLog[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+  VIEWER
+}
+
+// Organization/Tenant Management
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  domain      String?
+  logo        String?
+  primaryColor String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  users       User[]
+  subscriptions Subscription[]
+  instances   Instance[]
+  apiKeys     ApiKey[]
+  usageLogs   UsageLog[]
+
+  @@map("organizations")
+}
+
+// Subscription Plans
+model Plan {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  price       Float
+  currency    String   @default("USD")
+  interval    BillingInterval
+  features    Json     // Store plan features as JSON
+  limits      Json     // Store plan limits as JSON
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+// User Subscriptions
+model Subscription {
+  id            String   @id @default(cuid())
+  status        SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd Boolean @default(false)
+  canceledAt        DateTime?
+  endedAt           DateTime?
+  trialStart        DateTime?
+  trialEnd          DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Stripe fields
+  stripeSubscriptionId String? @unique
+  stripeCustomerId    String?
+  stripePriceId       String?
+
+  // Relationships
+  user    User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId  String
+  plan    Plan @relation(fields: [planId], references: [id])
+  planId  String
+  organization Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  UNPAID
+  TRIALING
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+}
+
+// SPX-GC Instances
+model Instance {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  port        Int      @unique
+  status      InstanceStatus @default(STOPPED)
+  config      Json     // Instance configuration
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  user    User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId  String
+  organization Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  @@map("instances")
+}
+
+enum InstanceStatus {
+  RUNNING
+  STOPPED
+  ERROR
+  STARTING
+  STOPPING
+}
+
+// API Keys for external integrations
+model ApiKey {
+  id          String   @id @default(cuid())
+  name        String
+  key         String   @unique
+  permissions Json     // Array of allowed permissions
+  lastUsed    DateTime?
+  expiresAt   DateTime?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  user    User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId  String
+  organization Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  @@map("api_keys")
+}
+
+// Usage tracking
+model UsageLog {
+  id          String   @id @default(cuid())
+  type        UsageType
+  value       Float
+  metadata    Json?
+  timestamp   DateTime @default(now())
+
+  // Relationships
+  user    User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId  String
+  organization Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+
+  @@map("usage_logs")
+}
+
+enum UsageType {
+  API_CALLS
+  STORAGE_USED
+  INSTANCE_HOURS
+  TEMPLATES_CREATED
+  RUNDOWNS_CREATED
+}
+
+// Billing events
+model BillingEvent {
+  id          String   @id @default(cuid())
+  type        BillingEventType
+  amount      Float
+  currency    String   @default("USD")
+  description String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  // Stripe fields
+  stripeEventId String? @unique
+  stripeInvoiceId String?
+
+  // Relationships
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+  subscriptionId String
+
+  @@map("billing_events")
+}
+
+enum BillingEventType {
+  INVOICE_CREATED
+  INVOICE_PAID
+  INVOICE_PAYMENT_FAILED
+  SUBSCRIPTION_CREATED
+  SUBSCRIPTION_UPDATED
+  SUBSCRIPTION_DELETED
+  PAYMENT_METHOD_ADDED
+  PAYMENT_METHOD_REMOVED
+} 
